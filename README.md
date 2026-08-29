@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="assets/bahnhf.jpg" alt="LLM-Bahnhof Banner" width="100%">
+</p>
+
+
 # LLM-Bahnhof 🚂 (v1.0.0)
 
 [DEU] **LLM-Bahnhof** ist ein schlanker, robuster, OpenAI-kompatibler Modell-Router und Fallback-Proxy für lokale und hybride KI-Infrastrukturen. Er fungiert als zentrale Weiche (*Bahnhof*) für deine LLM-Anfragen, leitet intelligent um und springt automatisch auf alternative Gleise (Modelle/Provider), wenn ein Endpunkt ausfällt.
