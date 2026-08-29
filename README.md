@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/bahnhf.jpg" alt="LLM-Bahnhof Banner" width="100%">
+  <img src="llm-bahnhf.jpg" alt="LLM-Bahnhof Banner" width="100%">
 </p>
 
 
