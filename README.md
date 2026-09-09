@@ -13,9 +13,9 @@
 
 [ENG] Automatic fallback loop across any number of providers (ROUTE_01, ROUTE_02, ...), virtual dummy model (`/v1/models`), model mapping and flexible timeouts.
 
-[DEU] **Version 1.0.0 ist der erste stabile Release** — mit behobenen Bugs aus v0.2.0, die in v0.1.0 den Betrieb verhinderten. Details siehe [Änderungen in v1.0.0](#9-änderungen-in-v100).
+[DEU] **Version 1.0.0 ist der erste stabile Release** — mit behobenen Bugs aus v0.2.0, die in v0.1.0 den Betrieb verhinderten. Details siehe [Änderungen in v1.0.0](#10-änderungen-in-v100).
 
-[ENG] **Version 1.0.0 is the first stable release** — fixing bugs from v0.2.0 that prevented v0.1.0 from working. Details in [Changes in v1.0.0](#9-änderungen-in-v100).
+[ENG] **Version 1.0.0 is the first stable release** — fixing bugs from v0.2.0 that prevented v0.1.0 from working. Details in [Changes in v1.0.0](#10-änderungen-in-v100).
 
 ---
 
@@ -223,7 +223,82 @@ ROUTE_05=https://api.openai.com/v1|sk-your-openai-key|gpt-4o|45s
 
 ---
 
-## 8. Tests
+## 8. Bahnhof-Tools / Bahnhofs-Manager
+
+[DEU] Zwei Kommandozeilen-Werkzeuge erleichtern die Verwaltung deiner Bahnhof-Konfiguration – die **Bahnhofs-Manager**: `sorter.py` zum interaktiven Anordnen der Routen und `check.py` zur Erreichbarkeits- und Funktionsprüfung.
+
+[ENG] Two command-line tools make managing your Bahnhof configuration easier – the **Bahnhofs-Manager**: `sorter.py` for interactively reordering routes and `check.py` for reachability and functionality checks.
+
+[DEU] Beide Werkzeuge arbeiten direkt auf der `.env` (kein separater Installationsschritt, reine Python-Standardbibliothek). Die Versionshistorie der Werkzeuge liegt in [CHANGELOG.md](CHANGELOG.md).
+
+[ENG] Both tools work directly on the `.env` (no separate installation step, pure Python standard library). The version history of the tools lives in [CHANGELOG.md](CHANGELOG.md).
+
+### 8.1 `sorter.py` – Routen interaktiv anordnen
+
+[DEU] Interaktives Terminal-Tool (ncurses), um die Routen einer **LLM-Bahnhof-.env** bequem anzuordnen – ohne die Datei von Hand zu editieren.
+
+[ENG] Interactive terminal tool (ncurses) to conveniently reorder the routes of an **LLM-Bahnhof .env** – without editing the file by hand.
+
+```bash
+python3 sorter.py [pfad/zur/.env]      # Default: ./.env
+python3 sorter.py --dump .env          # nicht-interaktive Vorschau
+python3 sorter.py --version            # Versionsnummer
+```
+
+[DEU]
+
+| Taste | Funktion |
+|---|---|
+| `↑` / `↓` oder `k` / `j` | Cursor zwischen Routen bewegen |
+| `Enter` oder `g` | Route „greifen“ / loslassen (zum Verschieben) |
+| `↑` / `↓` (im Greif-Modus) | Route über/unter den Nachbarn verschieben |
+| `d` oder `Leertaste` | deaktivieren (`#` davor) / aktivieren (`#` entfernen) |
+| `s` | speichern – nummeriert `ROUTE_01..N` neu nach Anzeige-Reihenfolge |
+| `q` | beenden (fragt bei ungespeicherten Änderungen) |
+| `?` | Hilfe anzeigen |
+
+[DEU] Die Anzeige spiegelt die Datei wider: `[ ]` = aktiv, `[#]` = deaktiviert. **Priorität = Reihenfolge:** Die oberste Route wird vom Bahnhof zuerst probiert, die nächste als Fallback usw. Andere Zeilen (Header, Kommentare) bleiben erhalten; Kommentare direkt über einer Route wandern beim Verschieben mit. Beim Speichern werden die Nummern neu vergeben (`ROUTE_01`, `ROUTE_02`, …).
+
+[ENG] The display mirrors the file: `[ ]` = active, `[#]` = deactivated. **Priority = order:** the top route is tried first by the Bahnhof, the next as fallback, etc. Other lines (headers, comments) are preserved; comments directly above a route move along with it. On save, numbers are reassigned (`ROUTE_01`, `ROUTE_02`, …).
+
+### 8.2 `check.py` – Routen prüfen
+
+[DEU] Prüft die Routing-Konfiguration einer **LLM-Bahnhof-.env**: Für jede **aktive** Route (Zeile ohne `#`) werden zwei Checks durchgeführt:
+
+[ENG] Checks the routing configuration of an **LLM-Bahnhof .env**: two checks are performed for every **active** route (line without `#`):
+
+[DEU]
+1. **Erreichbarkeit** – kommt überhaupt eine HTTP-Verbindung zur Basis-URL zustande (zuerst `/health`, dann Basis-URL; auch 4xx/5xx zählt als „erreichbar“, da die Verbindung steht).
+2. **Test-Call** – eine minimale Chat-Completion (`max_tokens: 10`, „Antworte nur mit: OK“) wird über `/chat/completions` gesendet.
+
+[ENG]
+1. **Reachability** – does an HTTP connection to the base URL work at all (first `/health`, then base URL; even 4xx/5xx counts as "reachable" since the connection stands).
+2. **Test call** – a minimal chat completion (`max_tokens: 10`, "Answer only with: OK") is sent via `/chat/completions`.
+
+```bash
+python3 check.py [pfad/zur/.env]        # Default: ./.env
+python3 check.py --version              # Versionsnummer
+python3 check.py .env -i 10.7.0.124          # Host temporär ersetzen
+python3 check.py .env -p 8000                # Port temporär ersetzen
+python3 check.py .env -i 10.7.0.124 -p 8000  # Host + Port temporär ersetzen
+python3 check.py -r http://10.7.0.124:8000   # Remote-Check ohne .env/Token
+```
+
+[DEU] **Mehrere Bahnhöfe überwachen:** Mit `-i HOST` und/oder `-p PORT` (Alias `--ip`/`--port`) werden Host bzw. Port **aller** Routen-URLs nur für diesen Lauf ersetzt – die `.env` bleibt unverändert. `-i` akzeptiert auch `HOST:PORT`; beide Schalter lassen sich beliebig kombinieren. So lässt sich dieselbe Routenliste gegen beliebige Bahnhofs-Instanzen prüfen. Wird nur der Host ersetzt, bleibt der Port der jeweiligen Route erhalten – und umgekehrt. Schlägt eine Route fehl (Timeout, Verbindungsabbruch, Warm-up-Phase), wird sie automatisch **ein zweites Mal** versucht, bevor sie als fehlgeschlagen gilt – der Check endet nie mit einem Python-Traceback.
+
+[DEU] **Remote-Check (`-r`):** Mit `-r URL[:PORT]` (oder `--remote`) prüfst du einen Bahnhof **ohne dessen `.env` und ohne Token** – ideal, um fremde oder weitere Bahnhofs-Instanzen zu überwachen: 1) antwortet der Router (`/health` bzw. Basis-URL)? 2) `/v1/models` → virtuelles Modell (`VIRTUAL_MODEL` – nur das Fake-Modell, die echten Ziel-Modelle stehen dort nicht drin). 3) Test-Call **ohne Token** über `/v1/chat/completions` – der Router nimmt den eigenen Upstream-Key aus seiner `.env` und mappt auf die **erste aktive Route**, sodass sichtbar wird, ob wirklich ein LLM antwortet. Exit `0` nur, wenn Router **und** ein LLM antworten; scheitern alle Routen, zeigt der Check die 503-Details des Routers.
+
+[ENG] **Monitoring several Bahnhöfe:** `-i HOST` and/or `-p PORT` (aliases `--ip`/`--port`) temporarily replace the host or port of **all** route URLs for this run only – the `.env` stays untouched. `-i` also accepts `HOST:PORT`; both switches can be combined freely. This lets you check the same route list against any Bahnhof instance. If only the host is replaced, each route keeps its own port – and vice versa. If a route fails (timeout, dropped connection, warm-up), it is automatically **retried once** before being marked as failed – the check never ends with a Python traceback.
+
+[ENG] **Remote check (`-r`):** With `-r URL[:PORT]` (or `--remote`) you check a Bahnhof **without its `.env` and without a token** – ideal for monitoring remote or additional Bahnhof instances: 1) does the router answer (`/health` or base URL)? 2) `/v1/models` → virtual model (`VIRTUAL_MODEL` – only the fake model, the real target models are not listed). 3) test call **without token** via `/v1/chat/completions` – the router uses its own upstream key from its `.env` and maps to the **first active route**, so you can see whether an actual LLM responds. Exit `0` only if the router **and** an LLM answer; if all routes fail, the check prints the router's 503 details.
+
+[DEU] **Exit-Code:** `0` = alle aktiven Routen antworten korrekt, `1` = mindestens eine Route fehlgeschlagen (für cron/Überwachung nutzbar), `2` = Datei-/Aufruffehler. Der Timeout pro Route kann als Sekunden (`30`, `90s`), Minuten (`15m`) oder Stunden (`2h`) angegeben werden; ohne Angabe gilt `DEFAULT_TIMEOUT` (60 s).
+
+[ENG] **Exit code:** `0` = all active routes respond correctly, `1` = at least one route failed (usable for cron/monitoring), `2` = file/usage error. The per-route timeout can be given in seconds (`30`, `90s`), minutes (`15m`) or hours (`2h`); without a value `DEFAULT_TIMEOUT` (60 s) applies.
+
+---
+
+## 9. Tests
 
 [DEU] Die Tests laufen **ohne echte API-Keys** und verwenden lokale Mock-Provider (funktionierend, kaputt, HTML-Fehlerseite, Stream, langsam):
 
@@ -240,7 +315,7 @@ python tests/test_router.py
 
 ---
 
-## 9. Änderungen in v1.0.0
+## 10. Änderungen in v1.0.0
 
 [ENG] Changes in v1.0.0
 
@@ -326,15 +401,15 @@ python tests/test_router.py
 
 [DEU]
 - `tests/mock_provider.py` — steuerbarer Mock-Provider (`MOCK_MODE=ok|stream|fail500|html|slow`).
-- `tests/test_router.py` — vollautomatische Testsuite (siehe [Abschnitt 8](#8-tests)).
+- `tests/test_router.py` — vollautomatische Testsuite (siehe [Abschnitt 9](#9-tests)).
 
 [ENG]
 - `tests/mock_provider.py` — controllable mock provider (`MOCK_MODE=ok|stream|fail500|html|slow`).
-- `tests/test_router.py` — fully automated test suite (see [Section 8](#8-tests)).
+- `tests/test_router.py` — fully automated test suite (see [Section 9](#9-tests)).
 
 ---
 
-## 10. Lizenz / License
+## 11. Lizenz / License
 
 [DEU] **LLM-Bahnhof** ist unter der [MIT-Lizenz](LICENSE) veröffentlicht.
 Du darfst den Code frei verwenden, modifizieren und verteilen.
