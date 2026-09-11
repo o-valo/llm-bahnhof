@@ -2,12 +2,17 @@
 # -*- coding: utf-8 -*-
 
 """
-LLM-Bahnhof (version 1.0.0)
+LLM-Bahnhof (version 1.1.0)
 ============================
 
-OpenAI-kompatibler Modell-Proxy mit automatischem Fallback-Loop ueber
+OpenAI-kompatibler Modell-Proxy mit automatischem Sticky-Fallback ueber
 beliebig viele Provider (ROUTE_01, ROUTE_02, ...), virtuellem Dummy-Modell
 (/v1/models), Modell-Mapping und flexiblen Timeouts.
+
+Sticky-Fallback: Neue Anfragen starten bei dem Gleis, das zuletzt erfolgreich
+war. Schlaegt eine Route fehl, springt der Bahnhof kreisend zur NAECHSTEN
+Route (ROUTE_02 -> ROUTE_03 -> ... -> ROUTE_N -> ROUTE_01) und NICHT
+vorzeitig zurueck zu ROUTE_01.
 
 Konfiguration (.env):
     VIRTUAL_MODEL=llm-bahnhof
@@ -34,6 +39,7 @@ Endpunkte:
 import os
 import re
 import logging
+import threading
 import requests
 from flask import Flask, request, Response, jsonify
 from dotenv import load_dotenv
@@ -60,6 +66,14 @@ DEFAULT_TIMEOUT = os.getenv("DEFAULT_TIMEOUT", "60s")
 # Wie viele komplette Durchlaeufe ueber alle Routen bei Fehlern versucht
 # werden (Schutz gegen transiente Fehler).
 MAX_PASSES = int(os.getenv("ROUTER_MAX_PASSES", "1"))
+
+# Sticky-Fallback: Index der Route, mit der die naechste Anfrage beginnt.
+# 0 = ROUTE_01. Nach einem Fehler wird kreisend beim naechsten Gleis
+# weitergemacht, nach einem Erfolg bleibt das erfolgreiche Gleis fuer die
+# naechste Anfrage stehen. Zugriff nur ueber _START_LOCK (Flask bedient
+# Requests multithreaded).
+_START_LOCK = threading.Lock()
+_START_INDEX = 0
 
 
 def parse_timeout(value, default=None):
@@ -143,7 +157,7 @@ def build_headers(route, incoming_auth, stream):
     headers = {
         "Content-Type": "application/json",
         "Accept": "text/event-stream" if stream else "application/json",
-        "User-Agent": "LLMBahnhof/1.0.0",
+        "User-Agent": "LLMBahnhof/1.1.0",
     }
 
     api_key = route["api_key"]
@@ -185,9 +199,13 @@ def list_models():
 @app.route("/", methods=["GET"])
 def health():
     """Status-/Diagnose-Endpunkt."""
+    with _START_LOCK:
+        start_route = ROUTES[_START_INDEX % len(ROUTES)]["name"] if ROUTES else None
     return jsonify({
         "status": "ok",
         "virtual_model": VIRTUAL_MODEL,
+        "max_passes": MAX_PASSES,
+        "start_route": start_route,
         "routes": [
             {
                 "name": r["name"],
@@ -200,10 +218,27 @@ def health():
     })
 
 
+def _alle_fehlgeschlagen(errors):
+    """Einheitliche 503-Antwort, wenn keine Route eine verwertbare Antwort lieferte."""
+    return jsonify({
+        "error": {
+            "code": 503,
+            "message": "LLM-Bahnhof Error: Keine verwertbare Modell-Antwort von keinem Endpunkt erhalten.",
+            "type": "router_error",
+            "routes_tried": [r["name"] for r in ROUTES],
+            "details": errors,
+        }
+    }), 503
+
+
 @app.route("/v1/chat/completions", methods=["POST"])
 @app.route("/api/v1/chat/completions", methods=["POST"])
 def proxy_chat_completions():
-    """Proxy mit Fallback: probiert alle Routen der Reihe nach durch."""
+    """Proxy mit Sticky-Fallback: beginnt beim zuletzt erfolgreichen Gleis und
+    springt bei Fehlern kreisend zur naechsten Route (erst nach dem Listenende
+    wieder bei ROUTE_01, nie vorzeitig zurueck)."""
+    global _START_INDEX
+
     incoming = request.get_json(silent=True)
     if not isinstance(incoming, dict):
         return jsonify({
@@ -218,8 +253,20 @@ def proxy_chat_completions():
     incoming_auth = request.headers.get("Authorization", "")
     errors = []
 
+    if not ROUTES:
+        # Keine Route konfiguriert -> sofort sauber mit 503 antworten.
+        return _alle_fehlgeschlagen(errors)
+
+    with _START_LOCK:
+        start_index = _START_INDEX % len(ROUTES)
+    logger.info(
+        f"[ROUTER] Neue Anfrage – Start bei {ROUTES[start_index]['name']} (Sticky-Fallback)."
+    )
+
     for pass_no in range(1, MAX_PASSES + 1):
-        for route in ROUTES:
+        for offset in range(len(ROUTES)):
+            index = (start_index + offset) % len(ROUTES)
+            route = ROUTES[index]
             payload = dict(incoming)
             # Modell-Mapping: Client-Modell wird durch das Ziel-Modell der Route ersetzt.
             payload["model"] = route["model"] or payload.get("model") or VIRTUAL_MODEL
@@ -290,7 +337,12 @@ def proxy_chat_completions():
                     finally:
                         upstream.close()
 
-                logger.info(f"[ROUTER] Erfolg bei {route['name']} – leite Stream durch.")
+                with _START_LOCK:
+                    _START_INDEX = index
+                logger.info(
+                    f"[ROUTER] Erfolg bei {route['name']} – leite Stream durch. "
+                    f"Naechster Start: {route['name']}."
+                )
                 # WICHTIG: Beim Streaming IMMER text/event-stream senden. Manche
                 # Upstreams (z. B. manche Cloud/Proxy-Endpunkte) liefern auch bei SSE application/json,
                 # was Clients wie Open WebUI daran hindert, die Antwort als Stream
@@ -311,19 +363,16 @@ def proxy_chat_completions():
                 errors.append(f"{route['name']}: HTML/Cloudflare im Body")
                 continue
 
-            logger.info(f"[ROUTER] Erfolg bei {route['name']} (Status 200) – reiche JSON durch.")
+            with _START_LOCK:
+                _START_INDEX = index
+            logger.info(
+                f"[ROUTER] Erfolg bei {route['name']} (Status 200) – reiche JSON durch. "
+                f"Naechster Start: {route['name']}."
+            )
             return Response(body, status=200, content_type="application/json")
 
     logger.critical("[CRITICAL] Alle Endpunkte fehlgeschlagen.")
-    return jsonify({
-        "error": {
-            "code": 503,
-            "message": "LLM-Bahnhof Error: Keine verwertbare Modell-Antwort von keinem Endpunkt erhalten.",
-            "type": "router_error",
-            "routes_tried": [r["name"] for r in ROUTES],
-            "details": errors,
-        }
-    }), 503
+    return _alle_fehlgeschlagen(errors)
 
 
 @app.after_request

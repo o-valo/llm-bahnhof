@@ -3,15 +3,15 @@
 </p>
 
 
-# LLM-Bahnhof 🚂 (v1.0.0)
+# LLM-Bahnhof 🚂 (v1.1.0)
 
 [DEU] **LLM-Bahnhof** ist ein schlanker, robuster, OpenAI-kompatibler Modell-Router und Fallback-Proxy für lokale und hybride KI-Infrastrukturen. Er fungiert als zentrale Weiche (*Bahnhof*) für deine LLM-Anfragen, leitet intelligent um und springt automatisch auf alternative Gleise (Modelle/Provider), wenn ein Endpunkt ausfällt.
 
 [ENG] **LLM-Bahnhof** is a lightweight, robust, OpenAI-compatible model router and fallback proxy designed for local and hybrid LLM infrastructures. It acts as a central switching station (*Bahnhof*) for your AI requests, intelligently routing prompts and falling back to alternative endpoints if primary models fail.
 
-[DEU] Automatischer Fallback-Loop über beliebig viele Provider (ROUTE_01, ROUTE_02, ...), virtuelles Dummy-Modell (`/v1/models`), Modell-Mapping und flexible Timeouts.
+[DEU] Automatischer Sticky-Fallback über beliebig viele Provider (ROUTE_01, ROUTE_02, ...), virtuelles Dummy-Modell (`/v1/models`), Modell-Mapping und flexible Timeouts.
 
-[ENG] Automatic fallback loop across any number of providers (ROUTE_01, ROUTE_02, ...), virtual dummy model (`/v1/models`), model mapping and flexible timeouts.
+[ENG] Automatic sticky fallback across any number of providers (ROUTE_01, ROUTE_02, ...), virtual dummy model (`/v1/models`), model mapping and flexible timeouts.
 
 [DEU] **Version 1.0.0 ist der erste stabile Release** — mit behobenen Bugs aus v0.2.0, die in v0.1.0 den Betrieb verhinderten. Details siehe [Änderungen in v1.0.0](#10-änderungen-in-v100).
 
@@ -23,7 +23,7 @@
 
 [DEU]
 - **OpenAI-kompatible API:** Drop-in-Ersatz für jeden OpenAI-Client (`openai`-SDK, `aider`, `Continue`, …).
-- **Smart Routing & Fallback:** Anfragen je nach Modellvorlieben routen (Modell-Mapping), mit automatischem Fallback auf die nächste Route bei Fehlern.
+- **Smart Routing & Sticky-Fallback:** Anfragen je nach Modellvorlieben routen (Modell-Mapping). Bei Fehlern wird kreisend zur nächsten Route gewechselt (ROUTE_02 → ROUTE_03 → … → ROUTE_N → ROUTE_01) und das erfolgreiche Gleis für Folgeanfragen gemerkt – kein vorzeitiges Zurückspringen zu ROUTE_01.
 - **Lokal & Hybrid:** Kombiniert lokale Ollama-Knoten und externe API-Provider (z. B. OpenAI, Hetzner, Groq, OpenRouter) in einem Endpunkt.
 - **Leichtgewichtig & schnell:** Reines Python ohne schwergewichtige Abhängigkeiten.
 - **Streaming:** Ungepuffertes SSE-Streaming inkl. Erkennung von HTML/Cloudflare-Fehlerseiten auch im Stream.
@@ -31,7 +31,7 @@
 
 [ENG]
 - **OpenAI-compatible API:** Drop-in replacement for any OpenAI client (`openai` SDK, `aider`, `Continue`, …).
-- **Smart Routing & Fallback:** Route requests by model preference (model mapping), with automatic fallback to the next route on errors.
+- **Smart routing & sticky fallback:** Route requests by model preference (model mapping). On errors the router moves on circularly to the next route (ROUTE_02 → ROUTE_03 → … → ROUTE_N → ROUTE_01) and remembers the successful route for subsequent requests – no premature jump back to ROUTE_01.
 - **Local & Hybrid:** Combines local Ollama nodes and external API providers (e.g. OpenAI, Hetzner, Groq, OpenRouter) in a single endpoint.
 - **Lightweight & fast:** Pure Python without heavy dependencies.
 - **Streaming:** Unbuffered SSE streaming, including detection of HTML/Cloudflare error pages even in the stream.
@@ -78,9 +78,9 @@ cp .env.example .env
 
 [ENG] **Important about timeouts with slow model startup (offloading):** The timeout applies per socket read operation, not to the total response time. If a model first has to be loaded/offloaded into memory, minutes can pass before the first answer arrives (especially with non-streaming, where Ollama only sends after complete generation). Therefore use generous timeouts (e.g. `10m`–`15m`) or `0` (= no timeout) for local Ollama routes. The default `DEFAULT_TIMEOUT=15m` in `.env` is chosen accordingly.
 
-[DEU] **Reihenfolge = Fallback-Reihenfolge:** ROUTE_01 wird zuerst probiert, dann ROUTE_02 usw. Bei Fehlern springt der Router automatisch zur nächsten Route.
+[DEU] **Reihenfolge = Priorität, Sticky-Fallback (ab v1.1.0):** Die Nummerierung gibt die Priorität vor. Eine neue Anfrage beginnt bei dem Gleis, das **zuletzt erfolgreich war**. Schlägt eine Route fehl, springt der Router kreisend zur **nächsten** Route (ROUTE_02 → ROUTE_03 → … → ROUTE_N → wieder ROUTE_01) – erst nach dem Listenende beginnt der Kreis von vorn, **nie vorzeitig zurück zu ROUTE_01**. Das zuletzt erfolgreiche Gleis bleibt für die nächsten Anfragen stehen; `/health` zeigt es als `start_route`.
 
-[ENG] **Order = fallback order:** ROUTE_01 is tried first, then ROUTE_02, etc. On errors the router automatically switches to the next route.
+[ENG] **Order = priority, sticky fallback (since v1.1.0):** The numbering defines the priority. A new request starts at the route that **succeeded last**. If a route fails, the router moves on circularly to the **next** route (ROUTE_02 → ROUTE_03 → … → ROUTE_N → ROUTE_01 again) – the circle restarts only after the end of the list, **never prematurely back to ROUTE_01**. The last successful route is kept for subsequent requests; `/health` shows it as `start_route`.
 
 ### Optionale Einstellungen / Optional settings
 
@@ -257,9 +257,9 @@ python3 sorter.py --version            # Versionsnummer
 | `q` | beenden (fragt bei ungespeicherten Änderungen) |
 | `?` | Hilfe anzeigen |
 
-[DEU] Die Anzeige spiegelt die Datei wider: `[ ]` = aktiv, `[#]` = deaktiviert. **Priorität = Reihenfolge:** Die oberste Route wird vom Bahnhof zuerst probiert, die nächste als Fallback usw. Andere Zeilen (Header, Kommentare) bleiben erhalten; Kommentare direkt über einer Route wandern beim Verschieben mit. Beim Speichern werden die Nummern neu vergeben (`ROUTE_01`, `ROUTE_02`, …).
+[DEU] Die Anzeige spiegelt die Datei wider: `[ ]` = aktiv, `[#]` = deaktiviert. **Priorität = Reihenfolge:** Die oberste Route wird vom Bahnhof zuerst probiert, die nächste als Fallback usw. Andere Zeilen (Header, Kommentare) bleiben erhalten; Kommentare direkt über einer Route wandern beim Verschieben mit. Beim Speichern werden die Nummern neu vergeben (`ROUTE_01`, `ROUTE_02`, …). Die Erklärzeile `# ROUTE_XX = …` wird beim Speichern **immer direkt über `ROUTE_01`** geschrieben – egal wo sie in der Datei steht, sie bleibt so dauerhaft die erste Zeile des Routen-Blocks.
 
-[ENG] The display mirrors the file: `[ ]` = active, `[#]` = deactivated. **Priority = order:** the top route is tried first by the Bahnhof, the next as fallback, etc. Other lines (headers, comments) are preserved; comments directly above a route move along with it. On save, numbers are reassigned (`ROUTE_01`, `ROUTE_02`, …).
+[ENG] The display mirrors the file: `[ ]` = active, `[#]` = deactivated. **Priority = order:** the top route is tried first by the Bahnhof, the next as fallback, etc. Other lines (headers, comments) are preserved; comments directly above a route move along with it. On save, numbers are reassigned (`ROUTE_01`, `ROUTE_02`, …). The `# ROUTE_XX = …` explanation line is **always written directly above `ROUTE_01`** on save – wherever it sits in the file, it permanently stays the first line of the route block.
 
 ### 8.2 `check.py` – Routen prüfen
 
@@ -286,11 +286,11 @@ python3 check.py -r http://10.7.0.124:8000   # Remote-Check ohne .env/Token
 
 [DEU] **Mehrere Bahnhöfe überwachen:** Mit `-i HOST` und/oder `-p PORT` (Alias `--ip`/`--port`) werden Host bzw. Port **aller** Routen-URLs nur für diesen Lauf ersetzt – die `.env` bleibt unverändert. `-i` akzeptiert auch `HOST:PORT`; beide Schalter lassen sich beliebig kombinieren. So lässt sich dieselbe Routenliste gegen beliebige Bahnhofs-Instanzen prüfen. Wird nur der Host ersetzt, bleibt der Port der jeweiligen Route erhalten – und umgekehrt. Schlägt eine Route fehl (Timeout, Verbindungsabbruch, Warm-up-Phase), wird sie automatisch **ein zweites Mal** versucht, bevor sie als fehlgeschlagen gilt – der Check endet nie mit einem Python-Traceback.
 
-[DEU] **Remote-Check (`-r`):** Mit `-r URL[:PORT]` (oder `--remote`) prüfst du einen Bahnhof **ohne dessen `.env` und ohne Token** – ideal, um fremde oder weitere Bahnhofs-Instanzen zu überwachen: 1) antwortet der Router (`/health` bzw. Basis-URL)? 2) `/v1/models` → virtuelles Modell (`VIRTUAL_MODEL` – nur das Fake-Modell, die echten Ziel-Modelle stehen dort nicht drin). 3) Test-Call **ohne Token** über `/v1/chat/completions` – der Router nimmt den eigenen Upstream-Key aus seiner `.env` und mappt auf die **erste aktive Route**, sodass sichtbar wird, ob wirklich ein LLM antwortet. Exit `0` nur, wenn Router **und** ein LLM antworten; scheitern alle Routen, zeigt der Check die 503-Details des Routers.
+[DEU] **Remote-Check (`-r`):** Mit `-r URL[:PORT]` (oder `--remote`) prüfst du einen Bahnhof **ohne dessen `.env` und ohne Token** – ideal, um fremde oder weitere Bahnhofs-Instanzen zu überwachen: 1) antwortet der Router (`/health` bzw. Basis-URL)? 2) `/v1/models` → virtuelles Modell (`VIRTUAL_MODEL` – nur das Fake-Modell, die echten Ziel-Modelle stehen dort nicht drin). 3) Test-Call **ohne Token** über `/v1/chat/completions` – der Router nimmt den eigenen Upstream-Key aus seiner `.env` und mappt auf die **aktuelle Start-Route** (Sticky-Fallback), sodass sichtbar wird, ob wirklich ein LLM antwortet. Exit `0` nur, wenn Router **und** ein LLM antworten; scheitern alle Routen, zeigt der Check die 503-Details des Routers.
 
 [ENG] **Monitoring several Bahnhöfe:** `-i HOST` and/or `-p PORT` (aliases `--ip`/`--port`) temporarily replace the host or port of **all** route URLs for this run only – the `.env` stays untouched. `-i` also accepts `HOST:PORT`; both switches can be combined freely. This lets you check the same route list against any Bahnhof instance. If only the host is replaced, each route keeps its own port – and vice versa. If a route fails (timeout, dropped connection, warm-up), it is automatically **retried once** before being marked as failed – the check never ends with a Python traceback.
 
-[ENG] **Remote check (`-r`):** With `-r URL[:PORT]` (or `--remote`) you check a Bahnhof **without its `.env` and without a token** – ideal for monitoring remote or additional Bahnhof instances: 1) does the router answer (`/health` or base URL)? 2) `/v1/models` → virtual model (`VIRTUAL_MODEL` – only the fake model, the real target models are not listed). 3) test call **without token** via `/v1/chat/completions` – the router uses its own upstream key from its `.env` and maps to the **first active route**, so you can see whether an actual LLM responds. Exit `0` only if the router **and** an LLM answer; if all routes fail, the check prints the router's 503 details.
+[ENG] **Remote check (`-r`):** With `-r URL[:PORT]` (or `--remote`) you check a Bahnhof **without its `.env` and without a token** – ideal for monitoring remote or additional Bahnhof instances: 1) does the router answer (`/health` or base URL)? 2) `/v1/models` → virtual model (`VIRTUAL_MODEL` – only the fake model, the real target models are not listed). 3) test call **without token** via `/v1/chat/completions` – the router uses its own upstream key from its `.env` and maps to the **current start route** (sticky fallback), so you can see whether an actual LLM responds. Exit `0` only if the router **and** an LLM answer; if all routes fail, the check prints the router's 503 details.
 
 [DEU] **Exit-Code:** `0` = alle aktiven Routen antworten korrekt, `1` = mindestens eine Route fehlgeschlagen (für cron/Überwachung nutzbar), `2` = Datei-/Aufruffehler. Der Timeout pro Route kann als Sekunden (`30`, `90s`), Minuten (`15m`) oder Stunden (`2h`) angegeben werden; ohne Angabe gilt `DEFAULT_TIMEOUT` (60 s).
 
@@ -309,9 +309,9 @@ source venv/bin/activate
 python tests/test_router.py
 ```
 
-[DEU] Geprüft werden u. a.: `/v1/models`, Fallback-Loop (Timeout → HTTP 500 → HTML → guter Provider), ungepuffertes SSE-Streaming, sauberer 503 mit Fehlerdetails sowie die Durchreichung des API-Keys. Logs der Testläufe landen in `tests/*.log`.
+[DEU] Geprüft werden u. a.: `/v1/models`, Fallback-Loop (Timeout → HTTP 500 → HTML → guter Provider), ungepuffertes SSE-Streaming, sauberer 503 mit Fehlerdetails sowie die Durchreichung des API-Keys. Logs der Testläufe landen in `tests/*.log`. Neu in v1.1.0: `tests/test_sticky_fallback.py` prüft den Sticky-Fallback (kreisende Rotation, kein Zurückspringen zu ROUTE_01, 503-Diagnose, Streaming-Merkung) gegen lokale Mock-Provider.
 
-[ENG] Checked among others: `/v1/models`, fallback loop (timeout → HTTP 500 → HTML → good provider), unbuffered SSE streaming, clean 503 with error details, and API key pass-through. Test logs go to `tests/*.log`.
+[ENG] Checked among others: `/v1/models`, fallback loop (timeout → HTTP 500 → HTML → good provider), unbuffered SSE streaming, clean 503 with error details, and API key pass-through. Test logs go to `tests/*.log`. New in v1.1.0: `tests/test_sticky_fallback.py` verifies the sticky fallback (circular rotation, no premature jump back to ROUTE_01, 503 diagnostics, streaming memory) against local mock providers.
 
 ---
 
@@ -409,7 +409,27 @@ python tests/test_router.py
 
 ---
 
-## 11. Lizenz / License
+## 11. Änderungen in v1.1.0 / Changes in v1.1.0
+
+[DEU] **Sticky-Fallback (Korrektur des Zurückspringens):** Bislang startete bei jeder neuen Anfrage der Fallback-Loop wieder bei ROUTE_01 – auch dann, wenn die letzte Anfrage z. B. über ROUTE_03 gelaufen war und nun ROUTE_02 defekt war. Der Bahnhof sprang dabei fälschlich auf ROUTE_01 zurück, statt zur nächsten Route (ROUTE_03, dann ROUTE_04 usw.) weiterzuziehen.
+
+[ENG] **Sticky fallback (fix of the premature jump-back):** Until now, every new request restarted the fallback loop at ROUTE_01 – even if the previous request had been answered e.g. via ROUTE_03 and ROUTE_02 was now broken. The station then wrongly jumped back to ROUTE_01 instead of moving on to the next route (ROUTE_03, then ROUTE_04 etc.).
+
+[DEU] Verhalten seit v1.1.0:
+- Neue Anfragen starten beim **zuletzt erfolgreichen Gleis** (threadsicher gemerkt).
+- Bei Fehlern: kreisend zur **nächsten** Route (ROUTE_02 → ROUTE_03 → … → ROUTE_N → wieder ROUTE_01) – erst nach dem Listenende beginnt der Kreis von vorn, **nie vorzeitig zurück zu ROUTE_01**.
+- `/health` zeigt das aktuelle Start-Gleis als `start_route` (zusätzlich `max_passes`).
+- Verifiziert durch `tests/test_sticky_fallback.py` (6 Szenarien mit Mock-Providern).
+
+[ENG] Behavior since v1.1.0:
+- New requests start at the **last successful route** (remembered thread-safely).
+- On errors: circularly to the **next** route (ROUTE_02 → ROUTE_03 → … → ROUTE_N → ROUTE_01 again) – the circle restarts only after the end of the list, **never prematurely back to ROUTE_01**.
+- `/health` reports the current start route as `start_route` (plus `max_passes`).
+- Verified by `tests/test_sticky_fallback.py` (6 scenarios with mock providers).
+
+---
+
+## 12. Lizenz / License
 
 [DEU] **LLM-Bahnhof** ist unter der [MIT-Lizenz](LICENSE) veröffentlicht.
 Du darfst den Code frei verwenden, modifizieren und verteilen.
