@@ -16,8 +16,8 @@ Aufruf:
   python3 check.py [pfad/zur/.env] -i HOST -p PORT  beides ersetzen
   python3 check.py -r URL[:PORT]  Remote-Check eines Bahnhofs OHNE .env/Token:
       Router-Erreichbarkeit (/health bzw. Basis-URL), /v1/models (virtuelles
-      Modell) und ein Test-Call ohne Token über die erste aktive Route
-      (antwortet ein echtes LLM?).
+      Modell) und ein Test-Call ohne Token über die aktuelle Start-Route des
+      Routers (Sticky-Fallback, antwortet ein echtes LLM?).
 
       Host und/oder Port ALLER Routen-URLs werden nur für diesen Lauf ersetzt –
       so lässt sich dieselbe Routenliste gegen andere Bahnhofs-Instanzen prüfen
@@ -37,19 +37,32 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 ROUTE_RE = re.compile(r"^\s*ROUTE_(\d+)\s*=(.*)$")
 DEFAULT_TIMEOUT = 60  # Sekunden, wenn keine Zeitangabe in der Route steht
 MAX_VERSUCHE = 2  # pro Route: 1. Versuch + 1 Wiederholung (Warm-up / transiente Fehler)
 
+# Token-Werte, die "kein eigener API-Key" bedeuten. Bewusst identisch zum
+# Router (llm_bahnhof.build_headers), sonst wuerde der Check einen
+# Authorization-Header senden, den der Router nie senden wuerde.
+KEIN_KEY = ("", "none", "-", "ollama", "leer")
 
-def parse_timeout(wert: str | None) -> float:
-    """'30' -> 30s, '90s' -> 90s, '15m' -> 900s, '0'/'leer' -> Default."""
+
+def parse_timeout(wert: str | None, default: float = DEFAULT_TIMEOUT) -> float:
+    """'30' -> 30s, '90s' -> 90s, '15m' -> 900s, '0'/'leer' -> `default`.
+
+    `default` ist normalerweise `DEFAULT_TIMEOUT` bzw. der `DEFAULT_TIMEOUT`-Wert
+    aus der .env – so wird ein dort gesetzter Default auch wirklich benutzt.
+
+    Hinweis: Der Router deutet einen Route-Timeout von `0` als "kein Timeout".
+    Der Check setzt hier bewusst `default` ein, damit er bei einer solchen
+    Route nicht unbegrenzt haengt (siehe README, Abschnitt 8.2).
+    """
     if not wert:
-        return DEFAULT_TIMEOUT
+        return default
     w = wert.strip().lower()
     if w in ("0", "", "none", "-"):
-        return DEFAULT_TIMEOUT
+        return default
     try:
         if w.endswith("m"):
             return float(w[:-1]) * 60
@@ -59,7 +72,7 @@ def parse_timeout(wert: str | None) -> float:
             return float(w[:-1]) * 3600
         return float(w)
     except ValueError:
-        return DEFAULT_TIMEOUT
+        return default
 
 
 def routen_lesen(pfad: str) -> list[dict]:
@@ -72,12 +85,14 @@ def routen_lesen(pfad: str) -> list[dict]:
         print(f"Fehler: Datei nicht lesbar – {e}", file=sys.stderr)
         sys.exit(2)
 
+    # DEFAULT_TIMEOUT zuerst suchen – unabhängig davon, wo die Zeile in der
+    # Datei steht (sonst würden davor stehende Routen den Modul-Default nutzen).
     default_timeout = DEFAULT_TIMEOUT
+    m = re.search(r"^\s*DEFAULT_TIMEOUT\s*=\s*(\S+)", text, re.MULTILINE)
+    if m:
+        default_timeout = parse_timeout(m.group(1))
+
     for zeile in text.splitlines():
-        m = re.match(r"^\s*DEFAULT_TIMEOUT\s*=\s*(\S+)", zeile)
-        if m:
-            default_timeout = parse_timeout(m.group(1))
-            continue
         m = ROUTE_RE.match(zeile)
         if not m:
             continue
@@ -87,7 +102,7 @@ def routen_lesen(pfad: str) -> list[dict]:
             print(f"⚠️  ROUTE_{nummer:02d}: ungültiges Format (erwartet URL|Token|Modell[|Timeout]) – übersprungen", file=sys.stderr)
             continue
         url, token, modell = felder[0], felder[1], felder[2]
-        timeout = parse_timeout(felder[3] if len(felder) > 3 else None) or default_timeout
+        timeout = parse_timeout(felder[3] if len(felder) > 3 else None, default_timeout)
         routen.append({"nummer": nummer, "url": url, "token": token, "modell": modell, "timeout": timeout})
 
     if not routen:
@@ -174,9 +189,9 @@ def test_call(route: dict) -> tuple[bool, str, str]:
         "temperature": 0,
     }).encode("utf-8")
     headers = {"Content-Type": "application/json"}
-    token = route["token"]
-    if token and token.lower() not in ("none", "leer"):
-        if token.startswith("Bearer "):
+    token = (route["token"] or "").strip()
+    if token.lower() not in KEIN_KEY:
+        if token.lower().startswith("bearer "):
             headers["Authorization"] = token
         else:
             headers["Authorization"] = "Bearer " + token
@@ -192,10 +207,13 @@ def test_call(route: dict) -> tuple[bool, str, str]:
             except ValueError:
                 # HTTP 200 mit Nicht-JSON (z. B. HTML-Fehlerseite) – sauber melden, kein Crash
                 return False, f"{dauer:.1f}s", f"kein JSON: {roh[:60]}"
-            antwort = ""
             try:
                 antwort = daten["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError):
+                antwort = None
+            if not isinstance(antwort, str):
+                # z. B. content=null oder Nicht-String: HTTP 200 zählt als
+                # erfolgreicher Test-Call, Rohdaten nur zur Anzeige.
                 antwort = json.dumps(daten)[:80]
             return True, f"{dauer:.1f}s", antwort.strip()[:60]
     except urllib.error.HTTPError as e:
@@ -265,7 +283,8 @@ def remote_check(base: str, port: str | None = None) -> int:
 
     1. Router-Erreichbarkeit (/health, dann Basis-URL)
     2. /v1/models -> virtuelles Modell (VIRTUAL_MODEL des Routers)
-    3. Test-Call OHNE Token -> antwortet ein echtes LLM (erste aktive Route)?
+    3. Test-Call OHNE Token -> antwortet ein echtes LLM (aktuelle
+       Start-Route, Sticky-Fallback)?
     """
     b = base.strip()
     if not b.startswith(("http://", "https://")):
@@ -277,7 +296,7 @@ def remote_check(base: str, port: str | None = None) -> int:
         b = url_ersetzen(b, None, port)
 
     print(f"🔍 Bahnhof-Remote-Check v{VERSION} für {b}")
-    print("   Ohne .env/Token – Router-Erreichbarkeit + LLM-Test-Call über die erste aktive Route\n")
+    print("   Ohne .env/Token – Router-Erreichbarkeit + LLM-Test-Call über die aktuelle Start-Route (Sticky-Fallback)\n")
 
     root = b[: -len("/v1")] if b.endswith("/v1") else b
 
@@ -354,7 +373,7 @@ def remote_check(base: str, port: str | None = None) -> int:
             if not isinstance(antwort, str) or not antwort.strip():
                 # z. B. content=null oder leere Antwort – dann Rohdaten zeigen
                 antwort = roh[:100]
-            print(f"✅ LLM antwortet (erste aktive Route): HTTP {r.status} ({dauer:.1f}s)")
+            print(f"✅ LLM antwortet (aktuelle Start-Route): HTTP {r.status} ({dauer:.1f}s)")
             print(f"   Antwort: „{str(antwort).strip()[:80]}“")
             print()
             print("✅ Remote-Check bestanden: Router erreichbar UND ein LLM liefert eine Antwort.")

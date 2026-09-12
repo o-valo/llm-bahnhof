@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-LLM-Bahnhof (version 1.1.0)
+LLM-Bahnhof (version 1.1.1)
 ============================
 
 OpenAI-kompatibler Modell-Proxy mit automatischem Sticky-Fallback ueber
@@ -55,8 +55,22 @@ logger = logging.getLogger("LLM_BAHNHOF")
 
 app = Flask(__name__)
 
+
+def env_int(name, default):
+    """Ganzzahl aus der Umgebung lesen – bei ungueltigem Wert sauber auf
+    `default` zurueckfallen, statt den Router beim Start abzustuerzen."""
+    roh = os.getenv(name)
+    if roh is None or str(roh).strip() == "":
+        return default
+    try:
+        return int(str(roh).strip())
+    except ValueError:
+        logger.warning(f"[CONFIG] Ungueltiger Wert fuer {name}: '{roh}' – verwende {default}")
+        return default
+
+
 HOST = os.getenv("ROUTER_HOST", "0.0.0.0")
-PORT = int(os.getenv("ROUTER_PORT", "8000"))
+PORT = env_int("ROUTER_PORT", 8000)
 
 # Virtuelles Modell, das Clients verwenden; wird pro Route auf das
 # echte Ziel-Modell gemappt.
@@ -64,8 +78,12 @@ VIRTUAL_MODEL = os.getenv("VIRTUAL_MODEL", "llm-bahnhof")
 DEFAULT_TIMEOUT = os.getenv("DEFAULT_TIMEOUT", "60s")
 
 # Wie viele komplette Durchlaeufe ueber alle Routen bei Fehlern versucht
-# werden (Schutz gegen transiente Fehler).
-MAX_PASSES = int(os.getenv("ROUTER_MAX_PASSES", "1"))
+# werden (Schutz gegen transiente Fehler). Mindestens 1 – sonst wuerde keine
+# Route mehr probiert.
+MAX_PASSES = env_int("ROUTER_MAX_PASSES", 1)
+if MAX_PASSES < 1:
+    logger.warning(f"[CONFIG] ROUTER_MAX_PASSES={MAX_PASSES} ist ungueltig – setze auf 1")
+    MAX_PASSES = 1
 
 # Sticky-Fallback: Index der Route, mit der die naechste Anfrage beginnt.
 # 0 = ROUTE_01. Nach einem Fehler wird kreisend beim naechsten Gleis
@@ -157,7 +175,7 @@ def build_headers(route, incoming_auth, stream):
     headers = {
         "Content-Type": "application/json",
         "Accept": "text/event-stream" if stream else "application/json",
-        "User-Agent": "LLMBahnhof/1.1.0",
+        "User-Agent": "LLMBahnhof/1.1.1",
     }
 
     api_key = route["api_key"]
@@ -321,7 +339,13 @@ def proxy_chat_completions():
                     upstream.close()
                     continue
 
-                if b"<html" in first_chunk.lower() or b"cloudflare" in first_chunk.lower():
+                # Nur als Fehlerseite werten, wenn der Chunk NICHT wie SSE
+                # aussieht. Sonst wuerde eine normale SSE-Antwort verworfen,
+                # die z. B. den Begriff "Cloudflare" im Text enthaelt.
+                erste_zeichen = first_chunk.lstrip()[:8].lower()
+                ist_sse = erste_zeichen.startswith((b"data:", b":", b"event:"))
+                kopf_low = first_chunk[:512].lower()
+                if not ist_sse and (b"<html" in kopf_low or b"cloudflare" in kopf_low):
                     logger.warning(f"[ROUTER] {route['name']} Stream enthaelt HTML – uebersprungen.")
                     errors.append(f"{route['name']}: HTML im Stream")
                     upstream.close()
@@ -358,7 +382,11 @@ def proxy_chat_completions():
 
             # Nicht-Streaming: Antwort komplett pruefen und durchreichen.
             body = upstream.text
-            if "<html" in body.lower() or "cloudflare" in body.lower():
+            # Gueltiges JSON ist IMMER eine echte Antwort – der HTML/Cloudflare-
+            # Check darf eine legitime Antwort (z. B. eine Frage ueber
+            # Cloudflare) nicht als Fehlerseite verwerfen.
+            ist_json = body.lstrip().startswith(("{", "["))
+            if not ist_json and ("<html" in body.lower() or "cloudflare" in body.lower()):
                 logger.warning(f"[ROUTER] {route['name']} Antwort enthaelt HTML/Cloudflare – uebersprungen.")
                 errors.append(f"{route['name']}: HTML/Cloudflare im Body")
                 continue

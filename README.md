@@ -3,7 +3,7 @@
 </p>
 
 
-# LLM-Bahnhof 🚂 (v1.1.0)
+# LLM-Bahnhof 🚂 (v1.1.1)
 
 [DEU] **LLM-Bahnhof** ist ein schlanker, robuster, OpenAI-kompatibler Modell-Router und Fallback-Proxy für lokale und hybride KI-Infrastrukturen. Er fungiert als zentrale Weiche (*Bahnhof*) für deine LLM-Anfragen, leitet intelligent um und springt automatisch auf alternative Gleise (Modelle/Provider), wenn ein Endpunkt ausfällt.
 
@@ -13,9 +13,9 @@
 
 [ENG] Automatic sticky fallback across any number of providers (ROUTE_01, ROUTE_02, ...), virtual dummy model (`/v1/models`), model mapping and flexible timeouts.
 
-[DEU] **Version 1.0.0 ist der erste stabile Release** — mit behobenen Bugs aus v0.2.0, die in v0.1.0 den Betrieb verhinderten. Details siehe [Änderungen in v1.0.0](#10-änderungen-in-v100).
+[DEU] **Version 1.0.0 ist der erste stabile Release** — mit behobenen Bugs aus v0.2.0, die in v0.1.0 den Betrieb verhinderten. Details siehe [Änderungen in v1.0.0](CHANGELOG.md).
 
-[ENG] **Version 1.0.0 is the first stable release** — fixing bugs from v0.2.0 that prevented v0.1.0 from working. Details in [Changes in v1.0.0](#10-änderungen-in-v100).
+[ENG] **Version 1.0.0 is the first stable release** — fixing bugs from v0.2.0 that prevented v0.1.0 from working. Details in [Changes in v1.0.0](CHANGELOG.md).
 
 ---
 
@@ -292,124 +292,13 @@ python3 check.py -r http://10.7.0.124:8000   # Remote-Check ohne .env/Token
 
 [ENG] **Remote check (`-r`):** With `-r URL[:PORT]` (or `--remote`) you check a Bahnhof **without its `.env` and without a token** – ideal for monitoring remote or additional Bahnhof instances: 1) does the router answer (`/health` or base URL)? 2) `/v1/models` → virtual model (`VIRTUAL_MODEL` – only the fake model, the real target models are not listed). 3) test call **without token** via `/v1/chat/completions` – the router uses its own upstream key from its `.env` and maps to the **current start route** (sticky fallback), so you can see whether an actual LLM responds. Exit `0` only if the router **and** an LLM answer; if all routes fail, the check prints the router's 503 details.
 
-[DEU] **Exit-Code:** `0` = alle aktiven Routen antworten korrekt, `1` = mindestens eine Route fehlgeschlagen (für cron/Überwachung nutzbar), `2` = Datei-/Aufruffehler. Der Timeout pro Route kann als Sekunden (`30`, `90s`), Minuten (`15m`) oder Stunden (`2h`) angegeben werden; ohne Angabe gilt `DEFAULT_TIMEOUT` (60 s).
+[DEU] **Exit-Code:** `0` = alle aktiven Routen antworten korrekt, `1` = mindestens eine Route fehlgeschlagen (für cron/Überwachung nutzbar), `2` = Datei-/Aufruffehler. Der Timeout pro Route kann als Sekunden (`30`, `90s`), Minuten (`15m`) oder Stunden (`2h`) angegeben werden; ohne Angabe gilt `DEFAULT_TIMEOUT` aus der `.env` (Modul-Default 60 s). **Hinweis:** Der Router deutet einen Route-Timeout von `0` als „kein Timeout“; `check.py` nutzt in diesem Fall `DEFAULT_TIMEOUT`, damit der Check bei einer solchen Route nicht unbegrenzt hängt. Ebenso wie der Router behandelt `check.py` die Token-Werte `none`, `-`, `ollama` (und leer) als „kein eigener API-Key“ und sendet dann keinen `Authorization`-Header.
 
-[ENG] **Exit code:** `0` = all active routes respond correctly, `1` = at least one route failed (usable for cron/monitoring), `2` = file/usage error. The per-route timeout can be given in seconds (`30`, `90s`), minutes (`15m`) or hours (`2h`); without a value `DEFAULT_TIMEOUT` (60 s) applies.
-
----
-
-## 9. Tests
-
-[DEU] Die Tests laufen **ohne echte API-Keys** und verwenden lokale Mock-Provider (funktionierend, kaputt, HTML-Fehlerseite, Stream, langsam):
-
-[ENG] The tests run **without real API keys** and use local mock providers (working, broken, HTML error page, stream, slow):
-
-```bash
-source venv/bin/activate
-python tests/test_router.py
-```
-
-[DEU] Geprüft werden u. a.: `/v1/models`, Fallback-Loop (Timeout → HTTP 500 → HTML → guter Provider), ungepuffertes SSE-Streaming, sauberer 503 mit Fehlerdetails sowie die Durchreichung des API-Keys. Logs der Testläufe landen in `tests/*.log`. Neu in v1.1.0: `tests/test_sticky_fallback.py` prüft den Sticky-Fallback (kreisende Rotation, kein Zurückspringen zu ROUTE_01, 503-Diagnose, Streaming-Merkung) gegen lokale Mock-Provider.
-
-[ENG] Checked among others: `/v1/models`, fallback loop (timeout → HTTP 500 → HTML → good provider), unbuffered SSE streaming, clean 503 with error details, and API key pass-through. Test logs go to `tests/*.log`. New in v1.1.0: `tests/test_sticky_fallback.py` verifies the sticky fallback (circular rotation, no premature jump back to ROUTE_01, 503 diagnostics, streaming memory) against local mock providers.
+[ENG] **Exit code:** `0` = all active routes respond correctly, `1` = at least one route failed (usable for cron/monitoring), `2` = file/usage error. The per-route timeout can be given in seconds (`30`, `90s`), minutes (`15m`) or hours (`2h`); without a value the `.env`'s `DEFAULT_TIMEOUT` applies (module default 60 s). **Note:** the router interprets a route timeout of `0` as "no timeout"; `check.py` uses `DEFAULT_TIMEOUT` in that case so the check does not hang indefinitely on such a route. Like the router, `check.py` treats the token values `none`, `-`, `ollama` (and empty) as "no own API key" and sends no `Authorization` header.
 
 ---
 
-## 10. Änderungen in v1.0.0
-
-[ENG] Changes in v1.0.0
-
-[DEU] **v1.0.0 ist der erste stabile Release** (Stand: 29.08.2026). Die Änderungen gegenüber v0.1.0:
-
-[ENG] **v1.0.0 is the first stable release** (as of 29.08.2026). The changes compared to v0.1.0:
-
-### Behobene Fehler / Fixed bugs (debugging)
-
-[DEU]
-1. **Konfiguration wurde nie geladen (Hauptfehler).** Der Code las getrennte Variablen wie `ROUTE_01_URL`, `ROUTE_01_MODEL`, `ROUTE_01_KEY` — die `.env` definiert aber das dokumentierte Pipe-Format `ROUTE_01=URL|Key|Modell|Timeout`. Dadurch fielen alle Routen auf Platzhalter-URLs (`.example`) zurück und wurden übersprungen → der Router antwortete immer mit 503.
-   - **Fix:** `load_routes()` parst jetzt das Pipe-Format, sortiert nach Nummer (ROUTE_01 zuerst) und überspringt nur wirklich ungültige/Platzhalter-URLs.
-2. **Basis-URL wurde nicht um `/chat/completions` ergänzt.** Der Router rief die konfigurierte Basis-URL direkt auf (404 beim Provider). Jetzt hängt `normalize_url()` den Endpunkt automatisch an.
-3. **Streaming lieferte nur den ersten Chunk.** Durch `next(iter_content(...))` plus einen *neuen* `iter_content()`-Iterator gingen nach dem ersten Chunk alle weiteren verloren (urllib3-Chunked-Verhalten). Der Stream wurde außerdem über `response.text` komplett gepuffert.
-   - **Fix:** Ein einziger Iterator wird weiterverwendet; der erste Chunk wird nur kurz geprüft (HTML/Cloudflare-Erkennung) und dann ungepuffert durchgereicht. `X-Accel-Buffering: no` verhindert Zwischenpufferung.
-4. **Timeout war hart auf 30 s codiert.** Jetzt gilt das Timeout pro Route (Format `30`, `90s`, `15m`, `0` = kein Timeout), Fallback auf `DEFAULT_TIMEOUT`.
-5. **Kein `/v1/models`-Endpunkt, kein virtuelles Modell.** Das im README versprochene Dummy-Modell (`VIRTUAL_MODEL`) wurde ignoriert.
-   - **Fix:** `GET /v1/models` (und Alias) liefert das virtuelle Modell; beim Proxy wird das Client-Modell pro Route auf das Ziel-Modell gemappt.
-6. **Unbrauchbare 503-Antwort ohne Diagnose.** Jetzt enthält der Fehler `routes_tried` und `details` (welcher Provider welchen Fehler lieferte).
-
-[ENG]
-1. **Configuration was never loaded (main bug).** The code read separate variables like `ROUTE_01_URL`, `ROUTE_01_MODEL`, `ROUTE_01_KEY` — but `.env` defines the documented pipe format `ROUTE_01=URL|Key|Model|Timeout`. Therefore all routes fell back to placeholder URLs (`.example`) and were skipped → the router always answered with 503.
-   - **Fix:** `load_routes()` now parses the pipe format, sorts by number (ROUTE_01 first) and only skips truly invalid/placeholder URLs.
-2. **Base URL was not extended with `/chat/completions`.** The router called the configured base URL directly (404 at the provider). Now `normalize_url()` appends the endpoint automatically.
-3. **Streaming only delivered the first chunk.** `next(iter_content(...))` plus a *new* `iter_content()` iterator lost all subsequent chunks after the first one (urllib3 chunked behavior). The stream was also fully buffered via `response.text`.
-   - **Fix:** A single iterator is reused; the first chunk is only briefly checked (HTML/Cloudflare detection) and then passed through unbuffered. `X-Accel-Buffering: no` prevents intermediate buffering.
-4. **Timeout was hardcoded to 30 s.** Now the timeout applies per route (format `30`, `90s`, `15m`, `0` = no timeout), falling back to `DEFAULT_TIMEOUT`.
-5. **No `/v1/models` endpoint, no virtual model.** The dummy model promised in the README (`VIRTUAL_MODEL`) was ignored.
-   - **Fix:** `GET /v1/models` (and alias) returns the virtual model; in the proxy the client model is mapped per route to the target model.
-6. **Useless 503 response without diagnostics.** Now the error contains `routes_tried` and `details` (which provider returned which error).
-
-### Neue Funktionen / New features
-
-[DEU]
-- `GET /health` für Status und Konfigurations-Diagnose.
-- `ROUTER_MAX_PASSES` für wiederholte Durchläufe über alle Routen.
-- `ROUTER_CORS` (Standard an) für Browser-basierte Tools.
-- API-Key-Handling: Route-Key gewinnt; ohne eigenen Key wird der Client-Key durchgereicht; `none` = kein Authorization-Header.
-- Automatische Tests mit lokalen Mock-Providern (`tests/`).
-
-[ENG]
-- `GET /health` for status and configuration diagnostics.
-- `ROUTER_MAX_PASSES` for repeated passes over all routes.
-- `ROUTER_CORS` (enabled by default) for browser-based tools.
-- API key handling: route key wins; without an own key the client key is passed through; `none` = no Authorization header.
-- Automated tests with local mock providers (`tests/`).
-
-### Konfigurations-Fix in `.env` / Configuration fix in `.env`
-
-[DEU]
-- Tippfehler korrigiert: `https://10.7.0.93:/11434/v1` (leerer Port) → `http://10.7.0.93:11434/v1`.
-- Modellnamen korrigiert: `qwen3:8b` existierte auf 10.7.0.79 nicht (Ollama: „model not found“ → die Route schlug immer fehl). Für die Tests wurden schnelle, hardwaregerechte Modelle gesetzt: ROUTE_01 → `granite4.1:8b` (10.7.0.79), ROUTE_02 → `granite4.1:8b` (10.7.0.93) – 8B-Modelle laufen auf der RTX 5060 problemlos und liefern Antworten ohne Reasoning-`<think>`-Präfix.
-- ROUTE_03 ergänzt: `qwen3.5-9b-babel-brief:latest` (10.7.0.24, Timeout 30m) als weiterer Fallback-Provider – Modell läuft dort dauerhaft, generiert aber langsam (großzügiges Timeout gesetzt).
-- ROUTE_04 ergänzt: `qwen2.5:3b` (10.7.0.81, Timeout 15m) – Host mit sehr kleinen Modellen, primär für Tests gedacht.
-
-[ENG]
-- Typo fixed: `https://10.7.0.93:/11434/v1` (empty port) → `http://10.7.0.93:11434/v1`.
-- Model names fixed: `qwen3:8b` did not exist on 10.7.0.79 (Ollama: "model not found" → the route always failed). Fast, hardware-appropriate models were set for the tests: ROUTE_01 → `granite4.1:8b` (10.7.0.79), ROUTE_02 → `granite4.1:8b` (10.7.0.93) – 8B models run fine on the RTX 5060 and answer without a reasoning `<think>` prefix.
-- ROUTE_03 added: `qwen3.5-9b-babel-brief:latest` (10.7.0.24, timeout 30m) as an additional fallback provider – model runs permanently there, but generates slowly (generous timeout set).
-- ROUTE_04 added: `qwen2.5:3b` (10.7.0.81, timeout 15m) – host with very small models, primarily intended for tests.
-
-### Verifikation gegen echte Provider / Verification against real providers (end-to-end)
-
-[DEU] Der Router wurde mit den echten Ollama-Instanzen unter 10.7.0.79 und 10.7.0.93 getestet (WireGuard):
-
-[ENG] The router was tested with the real Ollama instances at 10.7.0.79 and 10.7.0.93 (WireGuard):
-
-[DEU]
-- `GET /v1/models` → liefert `llm-bahnhof`.
-- Non-Streaming: Client sendet `llm-bahnhof` → Router mappt auf `phi4-mini-reasoning:3.8b`, Antwort in ~2 s (HTTP 200).
-- Streaming: SSE-Chunks kommen ungepuffert live durch (HTTP 200, `text/event-stream`).
-- Fallback real belegt: ROUTE_01 mit nicht existierendem Modell (404) → Router springt automatisch auf ROUTE_02 (200).
-- `GET /health` zeigt Konfiguration (Routen, Modelle, Timeouts).
-
-[ENG]
-- `GET /v1/models` → returns `llm-bahnhof`.
-- Non-streaming: client sends `llm-bahnhof` → router maps to `phi4-mini-reasoning:3.8b`, answer in ~2 s (HTTP 200).
-- Streaming: SSE chunks come through unbuffered live (HTTP 200, `text/event-stream`).
-- Fallback proven in practice: ROUTE_01 with non-existent model (404) → router automatically switches to ROUTE_02 (200).
-- `GET /health` shows the configuration (routes, models, timeouts).
-
-### Testumgebung / Test environment
-
-[DEU]
-- `tests/mock_provider.py` — steuerbarer Mock-Provider (`MOCK_MODE=ok|stream|fail500|html|slow`).
-- `tests/test_router.py` — vollautomatische Testsuite (siehe [Abschnitt 9](#9-tests)).
-
-[ENG]
-- `tests/mock_provider.py` — controllable mock provider (`MOCK_MODE=ok|stream|fail500|html|slow`).
-- `tests/test_router.py` — fully automated test suite (see [Section 9](#9-tests)).
-
----
-
-## 11. Änderungen in v1.1.0 / Changes in v1.1.0
+## 9. Änderungen in v1.1.0 / Changes in v1.1.0
 
 [DEU] **Sticky-Fallback (Korrektur des Zurückspringens):** Bislang startete bei jeder neuen Anfrage der Fallback-Loop wieder bei ROUTE_01 – auch dann, wenn die letzte Anfrage z. B. über ROUTE_03 gelaufen war und nun ROUTE_02 defekt war. Der Bahnhof sprang dabei fälschlich auf ROUTE_01 zurück, statt zur nächsten Route (ROUTE_03, dann ROUTE_04 usw.) weiterzuziehen.
 
@@ -429,7 +318,7 @@ python tests/test_router.py
 
 ---
 
-## 12. Lizenz / License
+## 10. Lizenz / License
 
 [DEU] **LLM-Bahnhof** ist unter der [MIT-Lizenz](LICENSE) veröffentlicht.
 Du darfst den Code frei verwenden, modifizieren und verteilen.

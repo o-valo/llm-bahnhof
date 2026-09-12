@@ -18,14 +18,20 @@ Aufruf:
 Der sorter arbeitet nur auf der angegebenen Datei. Andere Zeilen
 (Kommentare, Header) bleiben erhalten; direkt über einer Route stehende
 Kommentare wandern mit der Route mit.
+
+Die Erklärzeile `# ROUTE_XX = URL | Token | Ziel-Modell | Timeout` wird
+beim Speichern IMMER direkt über `ROUTE_01` geschrieben – egal wo sie in
+der Datei steht oder wie die Routen verschoben wurden.
 """
 
 import curses
 import re
 import sys
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 ROUTE_RE = re.compile(r"^\s*(#\s*)?ROUTE_(\d+)\s*=(.*)$")
+# Erklärzeile: `# ROUTE_XX = URL | Token | …` (XX ist keine Zahl, also keine Route)
+ERKL_RE = re.compile(r"^\s*#\s*ROUTE_XX\s*=(.*)$")
 
 
 class Route:
@@ -74,6 +80,11 @@ def parse(text: str) -> list:
                 items.append(("text", pc))
             pending = []
             items.append(("text", zeile))
+        elif ERKL_RE.match(zeile):
+            # Erklärzeile „# ROUTE_XX = …“: kein Pre-Kommentar der nächsten
+            # Route, sondern Spezial-Eintrag – landet beim Speichern immer
+            # direkt über ROUTE_01 (Invariante, siehe speichern()).
+            items.append(("erkl", zeile))
         else:
             pending.append(zeile)
     for pc in pending:
@@ -82,16 +93,28 @@ def parse(text: str) -> list:
 
 
 def speichern(pfad: str, items: list) -> None:
-    """Schreibt die .env: Text-Einträge unverändert, Routen neu nummeriert."""
+    """Schreibt die .env: Text-Einträge unverändert, Routen neu nummeriert.
+    Erklärzeilen (# ROUTE_XX = …) werden immer direkt über ROUTE_01 geschrieben."""
+    # Erklärzeilen VORAB sammeln – egal an welcher Stelle der Datei sie stehen.
+    erkl: list[str] = [val for typ, val in items if typ == "erkl"]
     out: list[str] = []
     laufende_nummer = 0
+    erste_route = True
     for typ, val in items:
+        if typ == "erkl":
+            continue   # wird oben (direkt über ROUTE_01) geschrieben
         if typ == "text":
             out.append(val)
         else:
+            if erste_route:
+                # Invariante: Erklärzeile IMMER oberhalb von ROUTE_01
+                out.extend(erkl)
+                erste_route = False
             laufende_nummer += 1
             out.extend(val.pre_comments)
             out.append(val.zeile(laufende_nummer))
+    if erste_route:   # keine Route vorhanden → Erklärzeilen am Ende erhalten
+        out.extend(erkl)
     with open(pfad, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
 

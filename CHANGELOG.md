@@ -164,20 +164,58 @@ as the router delivers a 200 response.
   (Erklärungszeile ist als Pre-Kommentar an `ROUTE_01` verankert).
 - `--version` / `-V`.
 
+### [1.1.0] – 2026-09-09
+
+[DEU]
+- **Fix:** Die Erklärzeile `# ROUTE_XX = …` bleibt jetzt IMMER direkt über
+  `ROUTE_01` – egal wo sie in der Datei steht oder wie Routen verschoben
+  wurden. Beim Speichern wird sie garantiert an diese Position gesetzt
+  (vorher konnte sie nach Verschiebungen/Hand-Edits hinter andere Routen
+  rutschen, z. B. zwischen `ROUTE_02` und `ROUTE_03`).
+
 [ENG]
-- **New:** Interactive ncurses tool to reorder the routes of a Bahnhof `.env`
-  (order = priority).
-- Grab/move (`Enter`/`g`, then `↑`/`↓`), deactivate/reactivate (`d`/Space sets
-  or removes `#`), save with renumbering (`ROUTE_01..N`), `--dump` for a
-  preview without the TUI.
-- Display mirrors the file: `[ ]` = active, `[#]` = deactivated.
-- Comments directly above a route move along with it (the explanation line is
-  anchored as a pre-comment of `ROUTE_01`).
-- `--version` / `-V`.
+- **Fix:** The `# ROUTE_XX = …` explanation line now ALWAYS stays directly
+  above `ROUTE_01` – regardless of where it sits in the file or how routes
+  were moved. On save it is guaranteed to be placed there (previously it
+  could drift below other routes after moves/manual edits, e.g. between
+  `ROUTE_02` and `ROUTE_03`).
 
 ---
 
 ## `llm_bahnhof.py` (Haupt-Router)
+
+### [1.1.0] – 2026-09-11
+
+[DEU]
+- **Fix – Sticky-Fallback (kein Zurückspringen mehr zu ROUTE_01):** Bisher
+  startete der Fallback-Loop bei jeder neuen Anfrage wieder bei ROUTE_01.
+  War die letzte Anfrage z. B. über ROUTE_03 gelaufen und war beim nächsten
+  Aufruf ROUTE_02 defekt, sprang der Router fälschlich auf ROUTE_01 zurück,
+  statt zur nächsten Route weiterzuziehen.
+- **Neu:** Neue Anfragen starten beim zuletzt erfolgreichen Gleis
+  (threadsicher gemerkt). Bei Fehlern läuft der Bahnhof kreisend weiter:
+  ROUTE_02 → ROUTE_03 → … → ROUTE_N → wieder ROUTE_01 – erst nach dem
+  Listenende beginnt der Kreis von vorn, nie vorzeitig zurück.
+- `/health` meldet jetzt zusätzlich `start_route` (aktuelles Start-Gleis)
+  und `max_passes`.
+- Verifiziert mit `tests/test_sticky_fallback.py` (6 Szenarien gegen lokale
+  Mock-Provider, u. a. „ROUTE_02 defekt → Antwort von ROUTE_03, nicht
+  ROUTE_01“).
+
+[ENG]
+- **Fix – sticky fallback (no premature jump back to ROUTE_01):** previously
+  every new request restarted the fallback loop at ROUTE_01. If the last
+  request had been answered via ROUTE_03 and ROUTE_02 was broken on the next
+  call, the router wrongly jumped back to ROUTE_01 instead of moving on to
+  the next route.
+- **New:** new requests start at the last successful route (remembered
+  thread-safely). On errors the station moves on circularly:
+  ROUTE_02 → ROUTE_03 → … → ROUTE_N → ROUTE_01 again – the circle restarts
+  only after the end of the list, never prematurely back.
+- `/health` now additionally reports `start_route` (current start route) and
+  `max_passes`.
+- Verified with `tests/test_sticky_fallback.py` (6 scenarios against local
+  mock providers).
 
 ### [1.0.0] – 2026-08-29
 
